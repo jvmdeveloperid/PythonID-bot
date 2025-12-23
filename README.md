@@ -10,7 +10,9 @@ A Telegram bot that monitors group messages and warns users who don't have a pub
 - Sends warnings to a dedicated topic (thread) for non-compliant users
 - **Warning topic protection**: Only admins and the bot can post in the warning topic
 - **DM unrestriction flow**: Restricted users can DM the bot to get unrestricted after completing their profile
-- **Progressive restriction**: Optional mode to restrict users after multiple warnings
+- **Progressive restriction**: Optional mode to restrict users after multiple warnings (message-based)
+- **Time-based auto-restriction**: Automatically restricts users after X hours from first warning
+- **Scheduled job**: Background scheduler checks and enforces time-based restrictions every 5 minutes
 
 ## Requirements
 
@@ -79,6 +81,8 @@ TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrSTUvwxYZ
 GROUP_ID=-1001234567890
 WARNING_TOPIC_ID=42
 RESTRICT_FAILED_USERS=false
+WARNING_THRESHOLD=3
+WARNING_TIME_THRESHOLD_MINUTES=180
 RULES_LINK=https://t.me/yourgroup/rules
 ```
 
@@ -93,6 +97,10 @@ uv run pythonid-bot
 
 # Run the bot (staging)
 BOT_ENV=staging uv run pythonid-bot
+
+# Stop gracefully with Ctrl+C
+# The bot handles SIGINT (Ctrl+C) and SIGTERM (Docker) signals
+# It will properly shut down the scheduler before exiting
 ```
 
 ## Environment Configuration
@@ -128,17 +136,19 @@ uv run pytest -v
 ### Test Coverage
 
 The project maintains comprehensive test coverage:
-- **All modules**: 100% coverage (237/237 statements)
-  - Services: `bot_info.py`, `user_checker.py`
+- **All modules**: 100% coverage including new scheduler module
+  - Services: `bot_info.py`, `scheduler.py`, `user_checker.py`
   - Handlers: `dm.py`, `message.py`, `topic_guard.py`
   - Database: `service.py`, `models.py`
   - Config: `config.py`
+  - Constants: `constants.py`
 
 All modules are fully unit tested with:
 - Mocked async dependencies (telegram bot API calls)
 - Edge case handling (errors, empty results, boundary conditions)
 - Database initialization and schema validation
-- 81 total tests across 8 test modules
+- Background job testing (scheduler creation, job configuration, auto-restriction logic)
+- **94 total tests** across 9 test modules
 
 ## Project Structure
 
@@ -156,40 +166,87 @@ PythonID/
 │   ├── test_database.py
 │   ├── test_dm_handler.py
 │   ├── test_message_handler.py
+│   ├── test_scheduler.py     # Scheduler job tests
 │   ├── test_topic_guard.py
 │   └── test_user_checker.py
 └── src/
     └── bot/
-        ├── main.py           # Entry point
-        ├── config.py         # Pydantic settings
+        ├── main.py              # Entry point
+        ├── config.py            # Pydantic settings
+        ├── constants.py         # Shared constants
         ├── handlers/
-        │   ├── dm.py         # DM unrestriction handler
-        │   ├── message.py    # Group message handler
-        │   └── topic_guard.py # Warning topic protection
+        │   ├── dm.py            # DM unrestriction handler
+        │   ├── message.py       # Group message handler
+        │   └── topic_guard.py   # Warning topic protection
         ├── database/
-        │   ├── models.py     # SQLModel schemas
-        │   └── service.py    # Database operations
+        │   ├── models.py        # SQLModel schemas
+        │   └── service.py       # Database operations
         └── services/
-            ├── bot_info.py   # Bot info caching
+            ├── bot_info.py      # Bot info caching
+            ├── scheduler.py     # Background job scheduler
             └── user_checker.py  # Profile validation
 ```
 
 ## How It Works
 
+### Architecture
+
+The bot is organized into clear modules for maintainability:
+
+- **main.py**: Entry point with graceful shutdown handling for KeyboardInterrupt
+- **handlers/**: Message processing logic
+  - `message.py`: Monitors group messages and sends warnings/restrictions
+  - `dm.py`: Handles DM unrestriction flow
+  - `topic_guard.py`: Protects warning topic from unauthorized messages
+- **services/**: Business logic and utilities
+  - `scheduler.py`: Background job that runs every 5 minutes for time-based auto-restrictions
+  - `user_checker.py`: Profile validation (photo + username check)
+  - `bot_info.py`: Caches bot metadata to avoid repeated API calls
+- **database/**: Data persistence
+  - `service.py`: Database operations with SQLite
+  - `models.py`: Data models using SQLModel
+- **config.py**: Environment configuration using Pydantic
+- **constants.py**: Centralized message templates and utilities for consistent formatting across handlers
+
 ### Group Message Monitoring
 1. Bot listens to all text messages in the configured group
 2. For each message, it checks if the sender has:
-   - A public profile picture (using `get_user_profile_photos`)
-   - A username set
+    - A public profile picture (using `get_user_profile_photos`)
+    - A username set
 3. If either is missing:
-   - **Warning mode** (default): Sends a warning to the designated topic
-   - **Restrict mode**: Progressive enforcement (see below)
+    - **Warning mode** (default): Sends a warning to the designated topic
+    - **Restrict mode**: Progressive enforcement (see below)
 
-### Progressive Restriction Mode
+### Progressive Restriction Mode (Message-Based)
 When `RESTRICT_FAILED_USERS=true`:
-1. **First message** → Warning sent to warning topic with DM link
+1. **First message** → Warning sent to warning topic (mentions message and time thresholds)
 2. **Messages 2 to (N-1)** → Silent (no spam)
 3. **Message N** → User restricted, notification sent with DM link
+
+Users are restricted when **either**:
+- They send N messages (message threshold), OR
+- X hours pass since first warning (time threshold)
+
+Whichever happens first triggers the restriction.
+
+### Time-Based Auto-Restriction
+The bot runs a background scheduler every 5 minutes that:
+1. Queries the database for warnings older than `WARNING_TIME_THRESHOLD_MINUTES`
+2. Restricts those users (applies mute permissions)
+3. Sends notifications to the warning topic with the DM link
+4. Marks them as restricted in the database
+
+This ensures users cannot evade restrictions by simply not sending messages.
+
+### Message Templates and Constants
+All warning and restriction messages are centralized in `constants.py` for consistency:
+- `WARNING_MESSAGE_NO_RESTRICTION`: Used in warning-only mode
+- `WARNING_MESSAGE_WITH_THRESHOLD`: Used in progressive restriction mode (first message)
+- `RESTRICTION_MESSAGE_AFTER_MESSAGES`: Sent when message threshold is reached
+- `RESTRICTION_MESSAGE_AFTER_TIME`: Sent when time threshold is reached
+- `format_threshold_display()`: Helper function that converts minutes to Indonesian format ("X jam" or "Y menit")
+
+All messages are formatted with proper Indonesian language patterns and include links to group rules and bot DM for unrestriction appeals.
 
 ### Warning Topic Protection
 - Only group administrators and the bot itself can post in the warning topic
@@ -209,10 +266,23 @@ When a restricted user DMs the bot (or sends `/start`):
 | `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather | Required |
 | `GROUP_ID` | Group ID to monitor (negative number) | Required |
 | `WARNING_TOPIC_ID` | Topic ID for warning messages | Required |
-| `RESTRICT_FAILED_USERS` | Enable progressive restriction | `false` |
-| `WARNING_THRESHOLD` | Messages before restriction | `3` |
+| `RESTRICT_FAILED_USERS` | Enable progressive restriction mode | `false` |
+| `WARNING_THRESHOLD` | Messages before restriction (message-based) | `3` |
+| `WARNING_TIME_THRESHOLD_MINUTES` | Minutes before auto-restriction (time-based) | `180` (3 hours) |
 | `DATABASE_PATH` | SQLite database path | `data/bot.db` |
 | `RULES_LINK` | Link to group rules message | `https://t.me/pythonID/290029/321799` |
+
+### Restriction Modes
+
+- **Warning Mode** (default, `RESTRICT_FAILED_USERS=false`): Users receive warnings but are not restricted. Useful for informing about rules without enforcement.
+
+- **Progressive Restriction Mode** (`RESTRICT_FAILED_USERS=true`): Users are restricted when either:
+  - **Message threshold** (`WARNING_THRESHOLD`): They send N messages with incomplete profile
+  - **Time threshold** (`WARNING_TIME_THRESHOLD_MINUTES`): X minutes pass since first warning
+
+Both message-based and time-based restrictions work together. Users are restricted by whichever threshold is reached first.
+
+**For testing**: Use `WARNING_TIME_THRESHOLD_MINUTES=5` in `.env.staging` to test with 5-minute threshold instead of 3 hours.
 
 ## Troubleshooting
 
@@ -233,6 +303,41 @@ When a restricted user DMs the bot (or sends `/start`):
 - User must be a member of the group (not left/kicked)
 - User must have been restricted by the bot, not by an admin
 - User must have completed their profile (photo + username)
+
+### Time-based restriction not working
+- Ensure `RESTRICT_FAILED_USERS=true` is set (or time-based restrictions are always active)
+- Check that `WARNING_TIME_THRESHOLD_MINUTES` is set correctly
+- The scheduler runs every 5 minutes; initial restriction may take up to 5 minutes
+- For testing, set `WARNING_TIME_THRESHOLD_MINUTES=5` to test with 5-minute timeout
+- Check bot logs for scheduler errors
+
+### Graceful Shutdown (Ctrl+C and Docker)
+- The bot handles both terminal interrupts and Docker container signals gracefully
+- **SIGINT (Ctrl+C)**: When you press Ctrl+C in the terminal
+- **SIGTERM (Docker)**: When Docker stops or restarts the container (`docker stop`, `docker restart`, etc.)
+
+When either signal is received, the bot will:
+1. Log the signal and reason (Docker vs terminal)
+2. Shut down the scheduler and wait for all background jobs to complete
+3. Log the shutdown status
+4. Exit cleanly with code 0
+
+**Docker deployment tip**: The bot will gracefully shut down within the default Docker stop timeout (10 seconds). This prevents the "Event loop is closed" RuntimeError that occurred in previous versions.
+
+Example Docker commands:
+```bash
+# Start the bot
+docker run -d --name pythonid-bot pythonid-bot
+
+# Stop gracefully (SIGTERM sent, bot has up to 10 seconds to shutdown)
+docker stop pythonid-bot
+
+# Restart gracefully (sends SIGTERM, waits for exit, then starts new container)
+docker restart pythonid-bot
+
+# Kill forcefully after timeout (not recommended, use docker stop instead)
+docker kill pythonid-bot
+```
 
 ## License
 

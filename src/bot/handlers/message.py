@@ -9,33 +9,23 @@ have complete profiles (photo + username). It implements two modes:
 
 import logging
 
-from telegram import ChatPermissions, Update
+from telegram import Update
 from telegram.ext import ContextTypes
 
 from bot.config import get_settings
+from bot.constants import (
+    MISSING_ITEMS_SEPARATOR,
+    RESTRICTED_PERMISSIONS,
+    RESTRICTION_MESSAGE_AFTER_MESSAGES,
+    WARNING_MESSAGE_NO_RESTRICTION,
+    WARNING_MESSAGE_WITH_THRESHOLD,
+    format_threshold_display,
+)
 from bot.database.service import get_database
 from bot.services.bot_info import BotInfoCache
 from bot.services.user_checker import check_user_profile
 
 logger = logging.getLogger(__name__)
-
-# Permissions applied when restricting a user (effectively mutes them)
-RESTRICTED_PERMISSIONS = ChatPermissions(
-    can_send_messages=False,
-    can_send_audios=False,
-    can_send_documents=False,
-    can_send_photos=False,
-    can_send_videos=False,
-    can_send_video_notes=False,
-    can_send_voice_notes=False,
-    can_send_polls=False,
-    can_send_other_messages=False,
-    can_add_web_page_previews=False,
-    can_change_info=False,
-    can_invite_users=False,
-    can_pin_messages=False,
-    can_manage_topics=False,
-)
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -77,15 +67,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Build warning message components
     missing = result.get_missing_items()
-    missing_text = " dan ".join(missing)
+    missing_text = MISSING_ITEMS_SEPARATOR.join(missing)
     user_mention = f"@{user.username}" if user.username else user.full_name
 
     # Warning mode: just send warning, don't restrict
     if not settings.restrict_failed_users:
-        warning_message = (
-            f"⚠️ Hai {user_mention}, mohon lengkapi {missing_text} kamu "
-            f"untuk mematuhi aturan grup.\n\n"
-            f"📖 [Baca aturan grup]({settings.rules_link})"
+        threshold_display = format_threshold_display(
+            settings.warning_time_threshold_minutes
+        )
+        warning_message = WARNING_MESSAGE_NO_RESTRICTION.format(
+            user_mention=user_mention,
+            missing_text=missing_text,
+            threshold_display=threshold_display,
+            rules_link=settings.rules_link,
         )
         await context.bot.send_message(
             chat_id=settings.group_id,
@@ -102,11 +96,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # First message: send warning with threshold info
     if record.message_count == 1:
-        warning_message = (
-            f"⚠️ Hai {user_mention}, mohon lengkapi {missing_text} kamu "
-            f"untuk mematuhi aturan grup.\n"
-            f"Kamu akan dibatasi setelah {settings.warning_threshold} pesan.\n\n"
-            f"📖 [Baca aturan grup]({settings.rules_link})"
+        threshold_display = format_threshold_display(
+            settings.warning_time_threshold_minutes
+        )
+        warning_message = WARNING_MESSAGE_WITH_THRESHOLD.format(
+            user_mention=user_mention,
+            missing_text=missing_text,
+            warning_threshold=settings.warning_threshold,
+            threshold_display=threshold_display,
+            rules_link=settings.rules_link,
         )
         await context.bot.send_message(
             chat_id=settings.group_id,
@@ -133,11 +131,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         dm_link = f"https://t.me/{bot_username}"
 
         # Send restriction notice with DM link for appeal
-        restriction_message = (
-            f"🚫 {user_mention} telah dibatasi setelah {record.message_count} pesan.\n"
-            f"Mohon lengkapi {missing_text} kamu untuk mematuhi aturan grup.\n\n"
-            f"📖 [Baca aturan grup]({settings.rules_link})\n"
-            f"✉️ [DM bot untuk membuka pembatasan]({dm_link})"
+        restriction_message = RESTRICTION_MESSAGE_AFTER_MESSAGES.format(
+            user_mention=user_mention,
+            message_count=record.message_count,
+            missing_text=missing_text,
+            rules_link=settings.rules_link,
+            dm_link=dm_link,
         )
         await context.bot.send_message(
             chat_id=settings.group_id,

@@ -39,6 +39,7 @@ class Settings(BaseSettings):
         warning_topic_id: Topic ID where warnings are posted (required).
         restrict_failed_users: Enable progressive restriction mode.
         warning_threshold: Number of messages before restricting user.
+        warning_time_threshold_minutes: Minutes before auto-restricting user.
         database_path: Path to SQLite database file.
         rules_link: URL to group rules message.
     """
@@ -48,6 +49,7 @@ class Settings(BaseSettings):
     warning_topic_id: int
     restrict_failed_users: bool = False
     warning_threshold: int = 3
+    warning_time_threshold_minutes: int = 180
     database_path: str = "data/bot.db"
     rules_link: str = "https://t.me/pythonID/290029/321799"
 

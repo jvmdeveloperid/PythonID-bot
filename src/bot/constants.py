@@ -1,0 +1,81 @@
+"""
+Application constants for the PythonID bot.
+
+This module contains shared constants used across multiple bot modules,
+including permissions, message templates, and formatting utilities.
+"""
+
+from telegram import ChatPermissions
+
+# Permissions applied when restricting a user (effectively mutes them)
+RESTRICTED_PERMISSIONS = ChatPermissions(
+    can_send_messages=False,
+    can_send_audios=False,
+    can_send_documents=False,
+    can_send_photos=False,
+    can_send_videos=False,
+    can_send_video_notes=False,
+    can_send_voice_notes=False,
+    can_send_polls=False,
+    can_send_other_messages=False,
+    can_add_web_page_previews=False,
+    can_change_info=False,
+    can_invite_users=False,
+    can_pin_messages=False,
+    can_manage_topics=False,
+)
+
+# Missing items separator for Indonesian language
+MISSING_ITEMS_SEPARATOR = " dan "
+
+
+def format_threshold_display(threshold_minutes: int) -> str:
+    """
+    Format time threshold in minutes to human-readable Indonesian text.
+    
+    Converts minutes to "X jam" for values >= 60, or "Y menit" for smaller values.
+    
+    Args:
+        threshold_minutes: Time threshold in minutes.
+        
+    Returns:
+        Formatted string like "3 jam" or "30 menit".
+    """
+    if threshold_minutes >= 60:
+        hours = threshold_minutes // 60
+        return f"{hours} jam"
+    return f"{threshold_minutes} menit"
+
+
+# Message templates used in warning and restriction scenarios
+# Warning mode (default): No restrictions, just warnings
+WARNING_MESSAGE_NO_RESTRICTION = (
+    "⚠️ Hai {user_mention}, mohon lengkapi {missing_text} kamu "
+    "untuk mematuhi aturan grup.\n"
+    "Kamu akan dibatasi setelah {threshold_display}.\n\n"
+    "📖 [Baca aturan grup]({rules_link})"
+)
+
+# Progressive restriction mode: First message warning
+WARNING_MESSAGE_WITH_THRESHOLD = (
+    "⚠️ Hai {user_mention}, mohon lengkapi {missing_text} kamu "
+    "untuk mematuhi aturan grup.\n"
+    "Kamu akan dibatasi setelah {warning_threshold} pesan atau {threshold_display}.\n\n"
+    "📖 [Baca aturan grup]({rules_link})"
+)
+
+# Restriction message when user reaches message threshold
+RESTRICTION_MESSAGE_AFTER_MESSAGES = (
+    "🚫 {user_mention} telah dibatasi setelah {message_count} pesan.\n"
+    "Mohon lengkapi {missing_text} kamu untuk mematuhi aturan grup.\n\n"
+    "📖 [Baca aturan grup]({rules_link})\n"
+    "✉️ [DM bot untuk membuka pembatasan]({dm_link})"
+)
+
+# Restriction message when user reaches time threshold (scheduler)
+RESTRICTION_MESSAGE_AFTER_TIME = (
+    "🚫 User {user_id} telah dibatasi karena tidak melengkapi profil "
+    "dalam {threshold_display}.\n\n"
+    "📖 [Baca aturan grup]({rules_link})\n"
+    "✉️ [DM bot untuk membuka pembatasan]({dm_link})"
+)

@@ -1,4 +1,5 @@
 import tempfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -147,6 +148,62 @@ class TestMarkUserUnrestricted:
     def test_does_nothing_for_non_existent_record(self, db_service):
         # Should not raise error
         db_service.mark_user_unrestricted(user_id=999, group_id=-100999)
+
+
+class TestGetWarningsPastTimeThreshold:
+    def test_returns_expired_warnings(self, db_service):
+        # Create record with old timestamp
+        old_time = datetime.now(UTC) - timedelta(minutes=1500)  # 25 hours
+        record = db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+        # Manually update to simulate old warning (in real tests, would mock time)
+        from sqlmodel import Session, select
+
+        with Session(db_service._engine) as session:
+            stmt = select(UserWarning).where(UserWarning.id == record.id)
+            db_record = session.exec(stmt).first()
+            db_record.first_warned_at = old_time
+            session.add(db_record)
+            session.commit()
+
+        # Should find the expired warning (1440 minutes = 24 hours)
+        expired = db_service.get_warnings_past_time_threshold(minutes_threshold=1440)
+        assert len(expired) == 1
+        assert expired[0].user_id == 123
+
+    def test_ignores_recent_warnings(self, db_service):
+        # Create record with recent timestamp (default)
+        db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+
+        # Should not find recent warnings
+        expired = db_service.get_warnings_past_time_threshold(minutes_threshold=1440)
+        assert len(expired) == 0
+
+    def test_ignores_restricted_users(self, db_service):
+        # Create and restrict a user
+        db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+        db_service.mark_user_restricted(user_id=123, group_id=-100999)
+
+        # Should not find restricted users even if old
+        expired = db_service.get_warnings_past_time_threshold(minutes_threshold=0)
+        assert len(expired) == 0
+
+    def test_returns_multiple_expired_warnings(self, db_service):
+        # Create multiple old records
+        for user_id in [123, 456, 789]:
+            record = db_service.get_or_create_user_warning(
+                user_id=user_id, group_id=-100999
+            )
+            from sqlmodel import Session, select
+
+            with Session(db_service._engine) as session:
+                stmt = select(UserWarning).where(UserWarning.id == record.id)
+                db_record = session.exec(stmt).first()
+                db_record.first_warned_at = datetime.now(UTC) - timedelta(minutes=1500)
+                session.add(db_record)
+                session.commit()
+
+        expired = db_service.get_warnings_past_time_threshold(minutes_threshold=1440)
+        assert len(expired) == 3
 
 
 class TestModuleLevelFunctions:

@@ -16,6 +16,9 @@ def mock_settings():
     settings.group_id = -1001234567890
     settings.warning_topic_id = 42
     settings.restrict_failed_users = False
+    settings.warning_time_threshold_minutes = 180
+    settings.warning_threshold = 3
+    settings.rules_link = "https://example.com/rules"
     return settings
 
 
@@ -194,6 +197,8 @@ class TestHandleMessageWithProgressiveRestriction:
         settings.warning_topic_id = 42
         settings.restrict_failed_users = True
         settings.warning_threshold = 3
+        settings.warning_time_threshold_minutes = 180
+        settings.rules_link = "https://example.com/rules"
         return settings
 
     async def test_first_message_sends_warning(

@@ -200,6 +200,33 @@ class DatabaseService:
                 session.add(record)
                 session.commit()
 
+    def get_warnings_past_time_threshold(
+        self, minutes_threshold: int
+    ) -> list[UserWarning]:
+        """
+        Find all active warnings that have exceeded the time threshold.
+
+        Looks for non-restricted warning records where the time elapsed
+        since first_warned_at exceeds the threshold, regardless of message count.
+
+        Args:
+            minutes_threshold: Number of minutes since first warning to trigger restriction.
+
+        Returns:
+            list[UserWarning]: List of warning records that should be auto-restricted.
+        """
+        from datetime import timedelta
+
+        with Session(self._engine) as session:
+            cutoff_time = datetime.now(UTC) - timedelta(minutes=minutes_threshold)
+            statement = select(UserWarning).where(
+                UserWarning.is_restricted == False,
+                UserWarning.first_warned_at <= cutoff_time,
+            )
+            records = session.exec(statement).all()
+            # Detach from session before returning
+            return [record for record in records]
+
 
 # Module-level singleton for database service
 _db_service: DatabaseService | None = None
