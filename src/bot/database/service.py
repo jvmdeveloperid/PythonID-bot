@@ -1,0 +1,250 @@
+"""
+Database service for the PythonID bot.
+
+This module provides the DatabaseService class for all database operations,
+plus module-level functions for initialization and access. Uses SQLModel
+with SQLite backend for persistence.
+"""
+
+from datetime import UTC, datetime
+from pathlib import Path
+
+from sqlmodel import Session, SQLModel, create_engine, select
+
+from bot.database.models import UserWarning
+
+
+class DatabaseService:
+    """
+    Service class for database operations.
+
+    Handles CRUD operations for user warnings and restrictions.
+    Includes automatic migrations for schema changes.
+    """
+
+    def __init__(self, database_path: str):
+        """
+        Initialize database connection and create tables.
+
+        Args:
+            database_path: Path to SQLite database file.
+                Parent directories are created if they don't exist.
+        """
+        path = Path(database_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        self._engine = create_engine(f"sqlite:///{database_path}")
+        SQLModel.metadata.create_all(self._engine)
+
+    def get_or_create_user_warning(self, user_id: int, group_id: int) -> UserWarning:
+        """
+        Get existing warning record or create a new one.
+
+        Looks for an active (non-restricted) warning record for the user.
+        If none exists, creates a new record with message_count=1.
+
+        Args:
+            user_id: Telegram user ID.
+            group_id: Telegram group ID.
+
+        Returns:
+            UserWarning: Active warning record for the user.
+        """
+        with Session(self._engine) as session:
+            # Look for active (non-restricted) warning record
+            statement = select(UserWarning).where(
+                UserWarning.user_id == user_id,
+                UserWarning.group_id == group_id,
+                UserWarning.is_restricted == False,
+            )
+            record = session.exec(statement).first()
+
+            if record:
+                return record
+
+            # Create new warning record
+            new_record = UserWarning(
+                user_id=user_id,
+                group_id=group_id,
+                message_count=1,
+                first_warned_at=datetime.now(UTC),
+                last_message_at=datetime.now(UTC),
+            )
+            session.add(new_record)
+            session.commit()
+            session.refresh(new_record)
+            return new_record
+
+    def increment_message_count(self, user_id: int, group_id: int) -> UserWarning:
+        """
+        Increment message count for an existing warning record.
+
+        Called when user sends additional messages after first warning
+        but before reaching the restriction threshold.
+
+        Args:
+            user_id: Telegram user ID.
+            group_id: Telegram group ID.
+
+        Returns:
+            UserWarning: Updated warning record.
+
+        Raises:
+            ValueError: If no active warning record exists.
+        """
+        with Session(self._engine) as session:
+            statement = select(UserWarning).where(
+                UserWarning.user_id == user_id,
+                UserWarning.group_id == group_id,
+                UserWarning.is_restricted == False,
+            )
+            record = session.exec(statement).first()
+
+            if record:
+                record.message_count += 1
+                record.last_message_at = datetime.now(UTC)
+                session.add(record)
+                session.commit()
+                session.refresh(record)
+                return record
+
+            raise ValueError(
+                f"No warning record found for user {user_id} in group {group_id}"
+            )
+
+    def mark_user_restricted(self, user_id: int, group_id: int) -> UserWarning:
+        """
+        Mark user as restricted after reaching threshold.
+
+        Sets is_restricted=True and restricted_by_bot=True to indicate
+        this restriction was applied by the bot (not manually by admin).
+
+        Args:
+            user_id: Telegram user ID.
+            group_id: Telegram group ID.
+
+        Returns:
+            UserWarning: Updated warning record.
+
+        Raises:
+            ValueError: If no active warning record exists.
+        """
+        with Session(self._engine) as session:
+            statement = select(UserWarning).where(
+                UserWarning.user_id == user_id,
+                UserWarning.group_id == group_id,
+                UserWarning.is_restricted == False,
+            )
+            record = session.exec(statement).first()
+
+            if record:
+                record.is_restricted = True
+                record.restricted_by_bot = True
+                record.last_message_at = datetime.now(UTC)
+                session.add(record)
+                session.commit()
+                session.refresh(record)
+                return record
+
+            raise ValueError(
+                f"No warning record found for user {user_id} in group {group_id}"
+            )
+
+    def is_user_restricted_by_bot(self, user_id: int, group_id: int) -> bool:
+        """
+        Check if user was restricted by this bot.
+
+        Only returns True if user has a record where both is_restricted
+        and restricted_by_bot are True. Users restricted by admins
+        (not tracked in our database) will return False.
+
+        Args:
+            user_id: Telegram user ID.
+            group_id: Telegram group ID.
+
+        Returns:
+            bool: True if user was restricted by this bot.
+        """
+        with Session(self._engine) as session:
+            statement = select(UserWarning).where(
+                UserWarning.user_id == user_id,
+                UserWarning.group_id == group_id,
+                UserWarning.is_restricted == True,
+                UserWarning.restricted_by_bot == True,
+            )
+            record = session.exec(statement).first()
+            return record is not None
+
+    def mark_user_unrestricted(self, user_id: int, group_id: int) -> None:
+        """
+        Clear bot restriction flag after user is unrestricted via DM.
+
+        Sets restricted_by_bot=False so the bot won't try to unrestrict
+        the user again (e.g., if admin later restricts them manually).
+
+        Args:
+            user_id: Telegram user ID.
+            group_id: Telegram group ID.
+        """
+        with Session(self._engine) as session:
+            statement = select(UserWarning).where(
+                UserWarning.user_id == user_id,
+                UserWarning.group_id == group_id,
+                UserWarning.is_restricted == True,
+                UserWarning.restricted_by_bot == True,
+            )
+            record = session.exec(statement).first()
+
+            if record:
+                record.restricted_by_bot = False
+                session.add(record)
+                session.commit()
+
+
+# Module-level singleton for database service
+_db_service: DatabaseService | None = None
+
+
+def init_database(database_path: str) -> DatabaseService:
+    """
+    Initialize the database service singleton.
+
+    Must be called once at application startup before any database operations.
+
+    Args:
+        database_path: Path to SQLite database file.
+
+    Returns:
+        DatabaseService: Initialized database service instance.
+    """
+    global _db_service
+    _db_service = DatabaseService(database_path)
+    return _db_service
+
+
+def get_database() -> DatabaseService:
+    """
+    Get the database service singleton.
+
+    Returns:
+        DatabaseService: Database service instance.
+
+    Raises:
+        RuntimeError: If init_database() hasn't been called.
+    """
+    if _db_service is None:
+        raise RuntimeError("Database not initialized. Call init_database() first.")
+    return _db_service
+
+
+def reset_database() -> None:
+    """
+    Reset database service singleton (for testing).
+
+    Clears the singleton so a new database can be initialized.
+    Properly disposes of the engine to close all connections.
+    """
+    global _db_service
+    if _db_service is not None:
+        _db_service._engine.dispose()
+    _db_service = None

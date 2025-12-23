@@ -1,0 +1,178 @@
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from bot.database.models import UserWarning
+from bot.database.service import (
+    DatabaseService,
+    get_database,
+    init_database,
+    reset_database,
+)
+
+
+@pytest.fixture
+def temp_db():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        init_database(str(db_path))
+        yield db_path
+        reset_database()
+
+
+@pytest.fixture
+def db_service(temp_db) -> DatabaseService:
+    return get_database()
+
+
+class TestDatabaseService:
+    def test_creates_database_file(self, temp_db):
+        assert temp_db.exists()
+
+    def test_creates_parent_directories(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "nested" / "path" / "test.db"
+            init_database(str(db_path))
+            assert db_path.exists()
+            reset_database()
+
+
+class TestGetOrCreateUserWarning:
+    def test_creates_new_record(self, db_service):
+        record = db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+
+        assert record.user_id == 123
+        assert record.group_id == -100999
+        assert record.message_count == 1
+        assert record.is_restricted is False
+
+    def test_returns_existing_record(self, db_service):
+        record1 = db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+        record2 = db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+
+        assert record1.id == record2.id
+        assert record2.message_count == 1
+
+    def test_different_users_get_different_records(self, db_service):
+        record1 = db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+        record2 = db_service.get_or_create_user_warning(user_id=456, group_id=-100999)
+
+        assert record1.id != record2.id
+
+    def test_creates_new_record_if_previous_was_restricted(self, db_service):
+        record1 = db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+        db_service.mark_user_restricted(user_id=123, group_id=-100999)
+
+        record2 = db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+
+        assert record1.id != record2.id
+        assert record2.message_count == 1
+
+
+class TestIncrementMessageCount:
+    def test_increments_count(self, db_service):
+        db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+
+        record = db_service.increment_message_count(user_id=123, group_id=-100999)
+
+        assert record.message_count == 2
+
+    def test_increments_multiple_times(self, db_service):
+        db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+
+        db_service.increment_message_count(user_id=123, group_id=-100999)
+        db_service.increment_message_count(user_id=123, group_id=-100999)
+        record = db_service.increment_message_count(user_id=123, group_id=-100999)
+
+        assert record.message_count == 4
+
+    def test_raises_error_if_no_record(self, db_service):
+        with pytest.raises(ValueError):
+            db_service.increment_message_count(user_id=999, group_id=-100999)
+
+
+class TestMarkUserRestricted:
+    def test_marks_as_restricted(self, db_service):
+        db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+
+        record = db_service.mark_user_restricted(user_id=123, group_id=-100999)
+
+        assert record.is_restricted is True
+
+    def test_raises_error_if_no_record(self, db_service):
+        with pytest.raises(ValueError):
+            db_service.mark_user_restricted(user_id=999, group_id=-100999)
+
+    def test_raises_error_if_already_restricted(self, db_service):
+        db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+        db_service.mark_user_restricted(user_id=123, group_id=-100999)
+
+        with pytest.raises(ValueError):
+            db_service.mark_user_restricted(user_id=123, group_id=-100999)
+
+    def test_sets_restricted_by_bot_flag(self, db_service):
+        db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+
+        record = db_service.mark_user_restricted(user_id=123, group_id=-100999)
+
+        assert record.restricted_by_bot is True
+
+
+class TestIsUserRestrictedByBot:
+    def test_returns_true_for_bot_restricted_user(self, db_service):
+        db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+        db_service.mark_user_restricted(user_id=123, group_id=-100999)
+
+        assert db_service.is_user_restricted_by_bot(user_id=123, group_id=-100999) is True
+
+    def test_returns_false_for_non_restricted_user(self, db_service):
+        db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+
+        assert db_service.is_user_restricted_by_bot(user_id=123, group_id=-100999) is False
+
+    def test_returns_false_for_non_existent_user(self, db_service):
+        assert db_service.is_user_restricted_by_bot(user_id=999, group_id=-100999) is False
+
+
+class TestMarkUserUnrestricted:
+    def test_clears_restricted_by_bot_flag(self, db_service):
+        db_service.get_or_create_user_warning(user_id=123, group_id=-100999)
+        db_service.mark_user_restricted(user_id=123, group_id=-100999)
+
+        db_service.mark_user_unrestricted(user_id=123, group_id=-100999)
+
+        assert db_service.is_user_restricted_by_bot(user_id=123, group_id=-100999) is False
+
+    def test_does_nothing_for_non_existent_record(self, db_service):
+        # Should not raise error
+        db_service.mark_user_unrestricted(user_id=999, group_id=-100999)
+
+
+class TestModuleLevelFunctions:
+    def test_get_database_raises_error_before_init(self):
+        """Test that get_database raises RuntimeError if init_database not called."""
+        reset_database()
+
+        with pytest.raises(RuntimeError, match="Database not initialized"):
+            get_database()
+
+    def test_init_database_returns_service(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "test.db"
+
+            service = init_database(str(db_path))
+
+            assert isinstance(service, DatabaseService)
+            reset_database()
+
+    def test_get_database_returns_same_instance(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "test.db"
+            init_database(str(db_path))
+
+            service1 = get_database()
+            service2 = get_database()
+
+            assert service1 is service2
+            reset_database()
