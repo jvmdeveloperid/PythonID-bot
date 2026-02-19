@@ -54,7 +54,7 @@ jobs:
 
       - name: Create app directory on server
         run: |
-          ssh deployer@103.31.204.189 'mkdir -p ~/jvmid-bot/data && chown 1000:1000 ~/jvmid-bot/data'
+          ssh deployer@103.31.204.189 'mkdir -p ~/jvmid-bot/data && sudo chown 1000:1000 ~/jvmid-bot/data'
 
       - name: Write .env file to server
         run: |
