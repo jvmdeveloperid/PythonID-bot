@@ -20,11 +20,11 @@ RUN mkdir -p /app/data
 # Copy remaining project files (code changes trigger new layer)
 COPY src/ ./src/
 
-# Create non-root user and set ownership
-RUN useradd -m -u 1000 bot && chown -R bot:bot /app
+# Make app directory writable for any user (supports dynamic UID via docker-compose)
+RUN chmod -R a+rw /app
 
-# Switch to non-root user
-USER bot
+# Set uv cache inside /app so any UID can write to it
+ENV UV_CACHE_DIR=/app/.cache/uv
 
 # Run the bot
 CMD ["uv", "run", "pythonid-bot"]
