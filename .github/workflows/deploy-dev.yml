@@ -56,6 +56,10 @@ jobs:
         run: |
           ssh deployer@103.31.204.189 'mkdir -p ~/jvmid-bot/data'
 
+      - name: Write .env file to server
+        run: |
+          ssh deployer@103.31.204.189 "echo '${{ secrets.DEV_ENV_FILE }}' > ~/jvmid-bot/.env"
+
       - name: Copy docker-compose.prod.yml to server
         run: |
           scp docker-compose.prod.yml deployer@103.31.204.189:~/jvmid-bot/docker-compose.prod.yml
