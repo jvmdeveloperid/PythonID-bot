@@ -52,6 +52,10 @@ jobs:
           echo "${{ secrets.DEV_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
+      - name: Create app directory on server
+        run: |
+          ssh deployer@103.31.204.189 'mkdir -p ~/jvmid-bot/data'
+
       - name: Copy docker-compose.prod.yml to server
         run: |
           scp docker-compose.prod.yml deployer@103.31.204.189:~/jvmid-bot/docker-compose.prod.yml
