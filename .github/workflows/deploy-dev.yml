@@ -66,11 +66,4 @@ jobs:
 
       - name: Deploy on server
         run: |
-          ssh deployer@103.31.204.189 << 'EOF'
-            cd ~/jvmid-bot
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d
-            docker image prune -f
-            echo "Deployment complete. Running containers:"
-            docker ps --filter "name=jvmid-bot"
-          EOF
+          ssh deployer@103.31.204.189 "cd ~/jvmid-bot && IMAGE_TAG=${{ github.run_number }} docker compose -f docker-compose.prod.yml pull && IMAGE_TAG=${{ github.run_number }} docker compose -f docker-compose.prod.yml up -d && docker image prune -f && echo 'Deployment complete (tag: ${{ github.run_number }}). Running containers:' && docker ps --filter 'name=jvmid-bot'"

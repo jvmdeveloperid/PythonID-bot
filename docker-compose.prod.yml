@@ -1,6 +1,6 @@
 services:
   bot:
-    image: hendisantika/jvmid-bot:latest
+    image: hendisantika/jvmid-bot:${IMAGE_TAG:-latest}
     container_name: jvmid-bot
     env_file: .env
     volumes:
