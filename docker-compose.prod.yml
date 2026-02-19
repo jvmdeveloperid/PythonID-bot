@@ -2,7 +2,7 @@ services:
   bot:
     image: hendisantika/jvmid-bot:${IMAGE_TAG:-latest}
     container_name: jvmid-bot
-    user: "${UID:-1000}:${GID:-1000}"
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
     env_file: .env
     volumes:
       - ./data:/app/data
