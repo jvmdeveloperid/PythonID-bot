@@ -85,11 +85,12 @@ def configure_logging() -> None:
         inspect_arguments=False,
     )
 
-    # Reconfigure logging with Logfire handler and configured level
+    # Reconfigure logging with both stream and Logfire handlers
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
     logging.basicConfig(
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         level=log_level,
-        handlers=[logfire.LogfireLoggingHandler()],
+        handlers=[stream_handler, logfire.LogfireLoggingHandler()],
         force=True,  # Override previous config
     )
 
