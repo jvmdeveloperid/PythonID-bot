@@ -74,9 +74,29 @@ jobs:
 
       - name: Health check
         run: |
-          echo "Waiting 15s for bot to start..."
-          sleep 15
           ssh deployer@103.31.204.189 '
+            echo "=== Waiting for bot to start ==="
+            MAX_RETRIES=12
+            RETRY_INTERVAL=10
+            for i in $(seq 1 $MAX_RETRIES); do
+              # Check container is still running
+              if ! docker ps --filter "name=jvmid-bot" --filter "status=running" -q | grep -q .; then
+                echo "❌ Container is NOT running"
+                docker logs jvmid-bot --tail 50 2>&1
+                exit 1
+              fi
+
+              # Check if groups have been registered
+              GROUPS_LOADED=$(docker logs jvmid-bot 2>&1 | grep -c "Registered group" || true)
+              if [ "$GROUPS_LOADED" -ge 1 ]; then
+                break
+              fi
+
+              echo "Attempt $i/$MAX_RETRIES: Bot still starting... (waiting ${RETRY_INTERVAL}s)"
+              sleep $RETRY_INTERVAL
+            done
+
+            echo ""
             echo "=== Container Status ==="
             docker ps --filter "name=jvmid-bot" --format "table {{.Names}}\t{{.Status}}\t{{.RunningFor}}"
 
@@ -86,7 +106,7 @@ jobs:
 
             echo ""
             echo "=== Health Checks ==="
-            # Check container is running
+            # Final container check
             if docker ps --filter "name=jvmid-bot" --filter "status=running" -q | grep -q .; then
               echo "✅ Container is running"
             else
@@ -95,16 +115,17 @@ jobs:
               exit 1
             fi
 
-            # Check groups loaded from logs
+            # Final groups check
             GROUPS_LOADED=$(docker logs jvmid-bot 2>&1 | grep -c "Registered group" || true)
             if [ "$GROUPS_LOADED" -ge 1 ]; then
               echo "✅ $GROUPS_LOADED group(s) registered"
             else
               echo "❌ No groups registered - check groups.json and logs"
+              docker logs jvmid-bot --tail 50 2>&1
               exit 1
             fi
 
-            # Check no crash loops (container restarted)
+            # Check no crash loops
             RESTART_COUNT=$(docker inspect jvmid-bot --format="{{.RestartCount}}" 2>/dev/null || echo "0")
             if [ "$RESTART_COUNT" -eq 0 ]; then
               echo "✅ No restarts detected"
