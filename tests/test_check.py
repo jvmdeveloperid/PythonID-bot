@@ -415,12 +415,9 @@ class TestHandleWarnCallback:
         mock_chat.full_name = "Test User"
         mock_context.bot.get_chat.return_value = mock_chat
 
-        with (
-            patch("bot.handlers.check.get_settings", return_value=mock_settings),
-            patch(
-                "bot.handlers.check.get_group_registry",
-                return_value=mock_registry,
-            ),
+        with patch(
+            "bot.handlers.check.get_group_registry",
+            return_value=mock_registry,
         ):
             await handle_warn_callback(update, mock_context)
 
@@ -458,12 +455,9 @@ class TestHandleWarnCallback:
         mock_chat.username = "testuser"
         mock_context.bot.get_chat.return_value = mock_chat
 
-        with (
-            patch("bot.handlers.check.get_settings", return_value=mock_settings),
-            patch(
-                "bot.handlers.check.get_group_registry",
-                return_value=mock_registry,
-            ),
+        with patch(
+            "bot.handlers.check.get_group_registry",
+            return_value=mock_registry,
         ):
             await handle_warn_callback(update, mock_context)
 
@@ -533,12 +527,9 @@ class TestHandleWarnCallback:
         mock_context.bot.get_chat.return_value = mock_chat
         mock_context.bot.send_message.side_effect = Exception("Failed to send")
 
-        with (
-            patch("bot.handlers.check.get_settings", return_value=mock_settings),
-            patch(
-                "bot.handlers.check.get_group_registry",
-                return_value=mock_registry,
-            ),
+        with patch(
+            "bot.handlers.check.get_group_registry",
+            return_value=mock_registry,
         ):
             await handle_warn_callback(update, mock_context)
 
@@ -565,12 +556,9 @@ class TestHandleWarnCallback:
         mock_context.bot.get_chat.return_value = mock_chat
         mock_context.bot.send_message.side_effect = TimedOut()
 
-        with (
-            patch("bot.handlers.check.get_settings", return_value=mock_settings),
-            patch(
-                "bot.handlers.check.get_group_registry",
-                return_value=mock_registry,
-            ),
+        with patch(
+            "bot.handlers.check.get_group_registry",
+            return_value=mock_registry,
         ):
             await handle_warn_callback(update, mock_context)
 
@@ -596,12 +584,9 @@ class TestHandleWarnCallback:
 
         mock_context.bot.get_chat.side_effect = TimedOut()
 
-        with (
-            patch("bot.handlers.check.get_settings", return_value=mock_settings),
-            patch(
-                "bot.handlers.check.get_group_registry",
-                return_value=mock_registry,
-            ),
+        with patch(
+            "bot.handlers.check.get_group_registry",
+            return_value=mock_registry,
         ):
             await handle_warn_callback(update, mock_context)
 
