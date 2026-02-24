@@ -71,3 +71,47 @@ jobs:
       - name: Deploy on server
         run: |
           ssh deployer@103.31.204.189 "cd ~/jvmid-bot && export DOCKER_UID=\$(id -u) DOCKER_GID=\$(id -g) && IMAGE_TAG=${{ github.run_number }} docker compose -f docker-compose.prod.yml pull && IMAGE_TAG=${{ github.run_number }} docker compose -f docker-compose.prod.yml up -d && docker image prune -f && echo 'Deployment complete (tag: ${{ github.run_number }}). Running containers:' && docker ps --filter 'name=jvmid-bot'"
+
+      - name: Health check
+        run: |
+          echo "Waiting 15s for bot to start..."
+          sleep 15
+          ssh deployer@103.31.204.189 '
+            echo "=== Container Status ==="
+            docker ps --filter "name=jvmid-bot" --format "table {{.Names}}\t{{.Status}}\t{{.RunningFor}}"
+
+            echo ""
+            echo "=== Bot Startup Logs ==="
+            docker logs jvmid-bot --tail 30 2>&1
+
+            echo ""
+            echo "=== Health Checks ==="
+            # Check container is running
+            if docker ps --filter "name=jvmid-bot" --filter "status=running" -q | grep -q .; then
+              echo "✅ Container is running"
+            else
+              echo "❌ Container is NOT running"
+              docker logs jvmid-bot --tail 50 2>&1
+              exit 1
+            fi
+
+            # Check groups loaded from logs
+            GROUPS_LOADED=$(docker logs jvmid-bot 2>&1 | grep -c "Registered group" || true)
+            if [ "$GROUPS_LOADED" -ge 1 ]; then
+              echo "✅ $GROUPS_LOADED group(s) registered"
+            else
+              echo "❌ No groups registered - check groups.json and logs"
+              exit 1
+            fi
+
+            # Check no crash loops (container restarted)
+            RESTART_COUNT=$(docker inspect jvmid-bot --format="{{.RestartCount}}" 2>/dev/null || echo "0")
+            if [ "$RESTART_COUNT" -eq 0 ]; then
+              echo "✅ No restarts detected"
+            else
+              echo "⚠️  Container restarted $RESTART_COUNT time(s)"
+            fi
+
+            echo ""
+            echo "=== Deployment healthy ==="
+          '
