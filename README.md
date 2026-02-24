@@ -607,6 +607,31 @@ docker stop pythonid-bot
 docker restart pythonid-bot
 ```
 
+## CI/CD Deployment
+
+The project uses GitHub Actions for automated testing and deployment:
+
+1. **Python Code Checks** (`python-checks.yml`) — Runs ruff lint and pytest across Python 3.11–3.14 on every push
+2. **Deploy to Dev Server** (`deploy-dev.yml`) — Builds Docker image, pushes to Docker Hub, and deploys to the dev server
+
+### GitHub Repository Variables
+
+The deployment workflow writes configuration files to the server from GitHub repository variables (**Settings > Secrets and variables > Actions > Variables**):
+
+| Variable | Description |
+|----------|-------------|
+| `DEV_ENV_FILE` | Contents of the `.env` file (bot token, database path, logging settings) |
+| `DEV_GROUPS_JSON` | Contents of `groups.json` for multi-group configuration |
+
+### GitHub Repository Secrets
+
+| Secret | Description |
+|--------|-------------|
+| `DOCKERHUB_USERNAME` | Docker Hub username for image push |
+| `DOCKERHUB_TOKEN` | Docker Hub access token |
+| `DEV_SSH_PRIVATE_KEY` | SSH private key for server access |
+| `DEV_SSH_KNOWN_HOSTS` | SSH known hosts entry for the server |
+
 ## License
 
 MIT
