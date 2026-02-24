@@ -23,9 +23,16 @@ A comprehensive Telegram bot for managing group members with profile verificatio
 - **New user probation**: New members restricted from sending links/forwarded messages for 3 days (configurable)
 - **Anti-spam enforcement**: Tracks violations and restricts spammers after threshold
 
+### Multi-Group Support
+- **Single bot instance** manages multiple Telegram groups simultaneously
+- **Per-group configuration** via `groups.json` with independent settings per group
+- **Fallback to `.env`** when `groups.json` is not present (single-group mode)
+- **Independent settings**: Each group has its own warning topic, thresholds, captcha, and probation config
+
 ### Admin Tools
 - **/verify command**: Whitelist users with hidden profile pictures (DM only)
 - **/unverify command**: Remove users from verification whitelist (DM only)
+- **/check command**: Check user profiles via DM
 - **Inline verification**: Forward messages to bot for quick verify/unverify buttons
 - **Automatic clearance**: Sends notification when verified users' warnings are cleared
 
@@ -85,6 +92,8 @@ A comprehensive Telegram bot for managing group members with profile verificatio
 
 ### 5. Configure Environment
 
+#### Single-Group Mode
+
 ```bash
 cp .env.example .env
 ```
@@ -100,6 +109,47 @@ WARNING_THRESHOLD=3
 WARNING_TIME_THRESHOLD_MINUTES=180
 RULES_LINK=https://t.me/yourgroup/rules
 ```
+
+#### Multi-Group Mode
+
+To manage multiple groups with a single bot instance, create a `groups.json` file:
+
+```bash
+cp groups.json.example groups.json
+```
+
+Edit `groups.json` with your groups:
+
+```json
+[
+  {
+    "group_id": -1001234567890,
+    "warning_topic_id": 123,
+    "restrict_failed_users": false,
+    "warning_threshold": 3,
+    "warning_time_threshold_minutes": 180,
+    "captcha_enabled": false,
+    "captcha_timeout_seconds": 120,
+    "new_user_probation_hours": 72,
+    "new_user_violation_threshold": 3,
+    "rules_link": "https://t.me/yourgroup/rules"
+  },
+  {
+    "group_id": -1009876543210,
+    "warning_topic_id": 456,
+    "restrict_failed_users": true,
+    "warning_threshold": 5,
+    "warning_time_threshold_minutes": 60,
+    "captcha_enabled": true,
+    "captcha_timeout_seconds": 180,
+    "new_user_probation_hours": 168,
+    "new_user_violation_threshold": 2,
+    "rules_link": "https://t.me/mygroup/rules"
+  }
+]
+```
+
+Each group has independent settings. When `groups.json` exists, the per-group `GROUP_ID`/`WARNING_TOPIC_ID`/etc. fields in `.env` are ignored. You still need `TELEGRAM_BOT_TOKEN`, `DATABASE_PATH`, and logging settings in `.env`.
 
 ## Installation
 
@@ -150,14 +200,14 @@ uv run pytest -v
 ### Test Coverage
 
 The project maintains comprehensive test coverage:
-- **Coverage**: 99% (1,216 statements)
-- **Tests**: 404 total
-- **Pass Rate**: 100% (404/404 passed)
-- **All modules**: 100% coverage including JobQueue scheduler integration, captcha verification, and anti-spam enforcement
+- **Coverage**: 99% (1,381 statements)
+- **Tests**: 440 total
+- **Pass Rate**: 100% (440/440 passed)
+- **All modules**: 100% coverage including JobQueue scheduler integration, captcha verification, anti-spam enforcement, and multi-group configuration
   - Services: `bot_info.py` (100%), `scheduler.py` (100%), `user_checker.py` (100%), `telegram_utils.py` (100%), `captcha_recovery.py` (100%)
   - Handlers: `anti_spam.py` (100%), `captcha.py` (100%), `check.py` (100%), `dm.py` (100%), `message.py` (100%), `topic_guard.py` (100%), `verify.py` (100%)
-  - Database: `service.py` (100%), `models.py` (100%)
-  - Config: `config.py` (100%)
+  - Database: `service.py` (97%), `models.py` (100%)
+  - Config: `config.py` (100%), `group_config.py` (100%)
   - Constants: `constants.py` (100%)
 
 All modules are fully unit tested with:
@@ -167,6 +217,7 @@ All modules are fully unit tested with:
 - Background job testing (JobQueue integration, job configuration, auto-restriction logic)
 - Captcha verification flow (new member handling, callback verification, timeout handling)
 - Anti-spam protection (forwarded messages, URL whitelisting, external replies)
+- Multi-group configuration (registry, per-group settings, fallback to `.env`)
 
 ## Project Structure
 
@@ -175,6 +226,8 @@ PythonID/
 ├── pyproject.toml
 ├── .env                  # Your configuration (not committed)
 ├── .env.example          # Example configuration
+├── groups.json           # Multi-group config (optional, not committed)
+├── groups.json.example   # Multi-group config template
 ├── README.md
 ├── data/
 │   └── bot.db            # SQLite database (auto-created)
@@ -183,25 +236,30 @@ PythonID/
 │   ├── test_bot_info.py
 │   ├── test_captcha.py
 │   ├── test_captcha_recovery.py
+│   ├── test_check.py
 │   ├── test_config.py
 │   ├── test_constants.py
 │   ├── test_database.py
 │   ├── test_dm_handler.py
+│   ├── test_group_config.py   # Multi-group config tests
 │   ├── test_message_handler.py
 │   ├── test_photo_verification.py
-│   ├── test_scheduler.py     # JobQueue scheduler tests
+│   ├── test_scheduler.py      # JobQueue scheduler tests
 │   ├── test_telegram_utils.py
 │   ├── test_topic_guard.py
 │   ├── test_user_checker.py
-│   └── test_verify_handler.py
+│   ├── test_verify_handler.py
+│   └── test_whitelist.py
 └── src/
     └── bot/
         ├── main.py              # Entry point with JobQueue integration
         ├── config.py            # Pydantic settings
+        ├── group_config.py      # Multi-group configuration & registry
         ├── constants.py         # Shared constants
         ├── handlers/
         │   ├── anti_spam.py     # Anti-spam handler for probation users
         │   ├── captcha.py       # Captcha verification handler
+        │   ├── check.py         # /check command & forwarded message handler
         │   ├── dm.py            # DM unrestriction handler
         │   ├── message.py       # Group message handler
         │   ├── topic_guard.py   # Warning topic protection
@@ -224,7 +282,8 @@ The following diagram illustrates the complete bot workflow including captcha ve
 ```mermaid
 flowchart TD
     Start([Bot Starts]) --> Init[Initialize Database & Config]
-    Init --> FetchAdmins[Fetch Group Admin IDs]
+    Init --> LoadGroups[Load Group Registry<br/>from groups.json or .env]
+    LoadGroups --> FetchAdmins[Fetch Admin IDs<br/>for All Groups]
     FetchAdmins --> RecoverCaptcha{Captcha<br/>Enabled?}
     RecoverCaptcha -->|Yes| RecoverPending[Recover Pending Captchas]
     RecoverCaptcha -->|No| StartJobs
@@ -380,7 +439,7 @@ flowchart TD
     classDef endNode fill:#e94560,stroke:#16213e,color:#eee
     classDef startNode fill:#1a5f7a,stroke:#16213e,color:#eee
     
-    class Init,FetchAdmins,RecoverPending,StartJobs,Poll,CheckProfile,CheckDMProfile,RestrictAndChallenge,StorePending,ScheduleTimeout,WaitCaptcha,StartProbation,StartProbationAfter processNode
+    class Init,LoadGroups,FetchAdmins,RecoverPending,StartJobs,Poll,CheckProfile,CheckDMProfile,RestrictAndChallenge,StorePending,ScheduleTimeout,WaitCaptcha,StartProbation,StartProbationAfter processNode
     class UpdateType,RecoverCaptcha,TopicGuard,IsAdmin,CheckBot,CheckWhitelist,ProfileComplete,CheckMode,CheckCount,CheckInGroup,CheckPendingCaptcha,DMProfileComplete,CheckBotRestricted,CheckCurrentStatus,HasExpired,CheckKicked,NextUser,CheckAdminVerify,CheckAdminUnverify,CaptchaAnswer,CheckCaptchaEnabled,CheckProbation,CheckExpired,CheckViolation,CheckWhitelisted,ViolationCount,CheckWarningsExist,CheckAdminForward,ExtractUser decisionNode
     class IncrementDB,SilentIncrement,MarkRestricted,ClearRecord,ClearRecord2,QueryDB,ClearKicked,MarkTimeRestricted,AddWhitelist,RemoveWhitelist,IncrementViolation,ClearProbation,DeleteWarnings dataNode
     class DeleteMsg,SendWarning,SendFirstWarning,RestrictUser,SendRestrictionMsg,SendNotInGroup,SendCaptchaRedirect,SendMissing,SendNoRestriction,SendAlreadyUnrestricted,UnrestrictUser,SendSuccess,ApplyTimeRestriction,SendTimeNotice,SchedulerJob,SendVerifySuccess,SendUnverifySuccess,DenyVerify,DenyUnverify,UnrestrictMember,KickMember,UpdateMessage,CancelTimeout,ShowError,DeleteSpam,SendSpamWarning,RestrictSpammer,SendSpamRestriction,UnrestrictVerified,SendClearance,DenyForward,SendButtons,SendExtractError,ProcessVerify,ProcessUnverify actionNode
@@ -395,6 +454,9 @@ flowchart TD
 The bot is organized into clear modules for maintainability:
 
 - **main.py**: Entry point with python-telegram-bot's JobQueue integration and graceful shutdown
+- **config.py**: Environment configuration using Pydantic
+- **group_config.py**: Multi-group configuration with `GroupConfig` and `GroupRegistry` (singleton pattern for O(1) group lookup)
+- **constants.py**: Centralized message templates and utilities for consistent formatting across handlers
 - **handlers/**: Message processing logic
   - `message.py`: Monitors group messages and sends warnings/restrictions
   - `dm.py`: Handles DM unrestriction flow
@@ -402,6 +464,7 @@ The bot is organized into clear modules for maintainability:
   - `captcha.py`: Captcha verification for new members
   - `anti_spam.py`: Anti-spam enforcement for users on probation
   - `verify.py`: /verify and /unverify command handlers
+  - `check.py`: /check command and forwarded message handler
 - **services/**: Business logic and utilities
   - `scheduler.py`: JobQueue background job that runs every 5 minutes for time-based auto-restrictions
   - `user_checker.py`: Profile validation (photo + username check)
@@ -411,8 +474,6 @@ The bot is organized into clear modules for maintainability:
 - **database/**: Data persistence
   - `service.py`: Database operations with SQLite
   - `models.py`: Data models using SQLModel (UserWarning, PhotoVerificationWhitelist, PendingCaptchaValidation, NewUserProbation)
-- **config.py**: Environment configuration using Pydantic
-- **constants.py**: Centralized message templates and utilities for consistent formatting across handlers
 
 ### Group Message Monitoring
 1. Bot listens to all text messages in the configured group
@@ -481,6 +542,7 @@ When a restricted user DMs the bot (or sends `/start`):
 | `NEW_USER_VIOLATION_THRESHOLD` | Spam violations before restriction | `3` |
 | `DATABASE_PATH` | SQLite database path | `data/bot.db` |
 | `RULES_LINK` | Link to group rules message | `https://t.me/pythonID/290029/321799` |
+| `GROUPS_CONFIG_PATH` | Path to `groups.json` for multi-group support | `groups.json` |
 | `LOGFIRE_ENABLED` | Enable Logfire logging integration | `true` |
 | `LOGFIRE_TOKEN` | Logfire API token (optional) | None |
 | `LOG_LEVEL` | Logging level (DEBUG/INFO/WARNING/ERROR) | `INFO` |
