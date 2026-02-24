@@ -72,4 +72,28 @@ jobs:
 
       - name: Deploy on server
         run: |
-          ssh deployer@103.31.204.189 "cd ~/jvmid-bot && export DOCKER_UID=\$(id -u) DOCKER_GID=\$(id -g) && IMAGE_TAG=${{ github.run_number }} docker compose -f docker-compose.prod.yml pull && IMAGE_TAG=${{ github.run_number }} docker compose -f docker-compose.prod.yml up -d && docker image prune -f && echo 'Deployment complete (tag: ${{ github.run_number }}). Running containers:' && docker ps --filter 'name=jvmid-bot'"
+          ssh deployer@103.31.204.189 '
+            cd ~/jvmid-bot
+            export DOCKER_UID=$(id -u) DOCKER_GID=$(id -g)
+
+            # Pull image with retry (up to 5 attempts, 15s between retries)
+            MAX_RETRIES=5
+            for i in $(seq 1 $MAX_RETRIES); do
+              echo "Pull attempt $i/$MAX_RETRIES..."
+              if IMAGE_TAG=${{ github.run_number }} docker compose -f docker-compose.prod.yml pull 2>&1; then
+                echo "Pull succeeded"
+                break
+              fi
+              if [ "$i" -eq "$MAX_RETRIES" ]; then
+                echo "Pull failed after $MAX_RETRIES attempts"
+                exit 1
+              fi
+              echo "Pull failed, retrying in 15s..."
+              sleep 15
+            done
+
+            IMAGE_TAG=${{ github.run_number }} docker compose -f docker-compose.prod.yml up -d
+            docker image prune -f
+            echo "Deployment complete (tag: ${{ github.run_number }}). Running containers:"
+            docker ps --filter "name=jvmid-bot"
+          '
