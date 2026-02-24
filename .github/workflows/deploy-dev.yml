@@ -60,6 +60,10 @@ jobs:
         run: |
           ssh deployer@103.31.204.189 "echo '${{ vars.DEV_ENV_FILE }}' > ~/jvmid-bot/.env"
 
+      - name: Write groups.json to server
+        run: |
+          ssh deployer@103.31.204.189 "echo '${{ vars.DEV_GROUPS_JSON }}' > ~/jvmid-bot/groups.json"
+
       - name: Copy docker-compose.prod.yml to server
         run: |
           scp docker-compose.prod.yml deployer@103.31.204.189:~/jvmid-bot/docker-compose.prod.yml
